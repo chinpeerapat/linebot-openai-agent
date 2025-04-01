@@ -1,8 +1,8 @@
-# LINE Bot with OpenAI Agent and Vertex AI
+# LINE Bot with OpenAI Agent and Google Gemini
 
 ## Project Background
 
-This project is a LINE bot that uses both OpenAI Agent functionality and Google's Vertex AI Gemini models to generate responses to text inputs. The bot can answer questions in Traditional Chinese and provide helpful information.
+This project is a LINE bot that uses both OpenAI Agent functionality and Google Gemini models to generate responses to text inputs. The bot can answer questions in Traditional Chinese and provide helpful information.
 
 ## Screenshot
 
@@ -30,8 +30,8 @@ TBC
 2. Set the following environment variables:
    - `ChannelSecret`: Your LINE channel secret
    - `ChannelAccessToken`: Your LINE channel access token
-   - `EXAMPLE_BASE_URL`: Your OpenAI compatible API base URL
-   - `EXAMPLE_API_KEY`: Your OpenAI compatible API key
+   - `EXAMPLE_BASE_URL`: Your OpenAI compatible API base URL. If you want to use Google Gemini, you should fill `https://generativelanguage.googleapis.com/v1beta/` here.
+   - `EXAMPLE_API_KEY`: Your OpenAI compatible API key, If you want to use Gemini
    - `EXAMPLE_MODEL_NAME`: The model name to use with the API (e.g., "gpt-4")
 
 3. Install the required dependencies:
