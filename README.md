@@ -1,8 +1,8 @@
-# Gemini Helper with LangChain and Vertex AI
+# LINE Bot with OpenAI Agent and Vertex AI
 
 ## Project Background
 
-This project is a LINE bot that uses Google's Vertex AI Gemini models through LangChain to generate responses to both text and image inputs. The bot can answer questions in Traditional Chinese and provide detailed descriptions of images.
+This project is a LINE bot that uses both OpenAI Agent functionality and Google's Vertex AI Gemini models to generate responses to text inputs. The bot can answer questions in Traditional Chinese and provide helpful information.
 
 ## Screenshot
 
@@ -10,8 +10,8 @@ This project is a LINE bot that uses Google's Vertex AI Gemini models through La
 
 ## Features
 
-- Text message processing using Gemini AI in Traditional Chinese
-- Image analysis with scientific detail in Traditional Chinese
+- Text message processing using OpenAI Agent in Traditional Chinese
+- Support for function calling with tools like weather information and translation
 - Integration with LINE Messaging API for easy mobile access
 - Built with FastAPI for efficient asynchronous processing
 
@@ -20,49 +20,46 @@ This project is a LINE bot that uses Google's Vertex AI Gemini models through La
 - Python 3
 - FastAPI
 - LINE Messaging API
-- Google Vertex AI (Gemini 2.0 Flash)
-- LangChain
+- OpenAI Agent framework
 - Aiohttp
 - PIL (Python Imaging Library)
 
 ## Setup
 
 1. Clone the repository to your local machine.
-2. Set up Google Cloud:
-   - Create a Google Cloud project
-   - Enable Vertex AI API
-   - Set up authentication (service account or application default credentials)
-
-3. Set the following environment variables:
+2. Set the following environment variables:
    - `ChannelSecret`: Your LINE channel secret
    - `ChannelAccessToken`: Your LINE channel access token
-   - `GOOGLE_PROJECT_ID`: Your Google Cloud Project ID
-   - `GOOGLE_LOCATION`: Google Cloud region (default: us-central1)
-   - Optional: `GOOGLE_APPLICATION_CREDENTIALS`: Path to service account key file (if running locally)
+   - `EXAMPLE_BASE_URL`: Your OpenAI compatible API base URL
+   - `EXAMPLE_API_KEY`: Your OpenAI compatible API key
+   - `EXAMPLE_MODEL_NAME`: The model name to use with the API (e.g., "gpt-4")
 
-4. Install the required dependencies:
+3. Install the required dependencies:
 
    ```
    pip install -r requirements.txt
    ```
 
-5. Start the FastAPI server:
+4. Start the FastAPI server:
 
    ```
    uvicorn main:app --reload
    ```
 
-6. Set up your LINE bot webhook URL to point to your server's endpoint.
+5. Set up your LINE bot webhook URL to point to your server's endpoint.
 
 ## Usage
 
 ### Text Processing
 
-Send any text message to the LINE bot, and it will use Vertex AI's Gemini model to generate a response in Traditional Chinese.
+Send any text message to the LINE bot, and it will use the OpenAI Agent to generate a response in Traditional Chinese.
 
-### Image Processing
+### Available Tools
 
-Send an image to the bot, and it will analyze and describe the image with scientific detail in Traditional Chinese.
+The bot has access to the following function tools:
+
+- `get_weather`: Get weather information for a specified city
+- `translate_to_chinese`: Translate text to Traditional Chinese
 
 ## Deployment Options
 
@@ -70,19 +67,32 @@ Send an image to the bot, and it will analyze and describe the image with scient
 
 Use ngrok or similar tools to expose your local server to the internet for webhook access:
 
-### Google Cloud Run
+```
+ngrok http 8000
+```
+
+### Docker Deployment
+
+You can use the included Dockerfile to build and deploy the application:
+
+```
+docker build -t linebot-openai-agent .
+docker run -p 8000:8000 -e ChannelSecret=YOUR_SECRET -e ChannelAccessToken=YOUR_TOKEN -e EXAMPLE_BASE_URL=YOUR_BASE_URL -e EXAMPLE_API_KEY=YOUR_API_KEY -e EXAMPLE_MODEL_NAME=YOUR_MODEL linebot-openai-agent
+```
+
+### Cloud Deployment
 
 1. Install the Google Cloud SDK and authenticate with your Google Cloud account.
 2. Build the Docker image:
 
    ```
-   gcloud builds submit --tag gcr.io/$GOOGLE_PROJECT_ID/linebot-gemini
+   gcloud builds submit --tag gcr.io/$GOOGLE_PROJECT_ID/linebot-openai-agent
    ```
 
 3. Deploy the Docker image to Cloud Run:
 
    ```
-   gcloud run deploy linebot-gemini --image gcr.io/$GOOGLE_PROJECT_ID/linebot-gemini --platform managed --region $GOOGLE_LOCATION --allow-unauthenticated
+   gcloud run deploy linebot-openai-agent --image gcr.io/$GOOGLE_PROJECT_ID/linebot-openai-agent --platform managed --region $REGION --allow-unauthenticated
    ```
 
 4. Set up your LINE bot webhook URL to point to the Cloud Run service URL.
