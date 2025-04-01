@@ -6,7 +6,8 @@ This project is a LINE bot that uses both OpenAI Agent functionality and Google 
 
 ## Screenshot
 
-TBC
+![image](https://github.com/user-attachments/assets/61066eef-2802-4967-a5eb-e2a4e430e5f7)
+
 
 ## Features
 
