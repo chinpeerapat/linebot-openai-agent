@@ -6,7 +6,7 @@ This project is a LINE bot that uses both OpenAI Agent functionality and Google'
 
 ## Screenshot
 
-![image](https://github.com/kkdai/linebot-gemini-python/assets/2252691/466fbe7c-e704-45f9-8584-91cfa2c99e48)
+TBC
 
 ## Features
 
