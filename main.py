@@ -2,14 +2,14 @@ import os
 import sys
 import asyncio
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import json
 import base64
 from datetime import datetime
 
 import aiohttp
 import PIL.Image
-from fastapi import Request, FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException, BackgroundTasks
 from openai import AsyncOpenAI
 from agents import Agent, OpenAIChatCompletionsModel, Runner, function_tool, set_tracing_disabled, WebSearchTool, FileSearchTool
 
@@ -221,7 +221,7 @@ async def process_pdf(message_id: str, file_name: str) -> Tuple[str, Optional[st
         raise HTTPException(status_code=400, detail=error_msg)
 
 @app.post("/")
-async def handle_callback(request: Request):
+async def handle_callback(request: Request, background_tasks: BackgroundTasks):
     signature = request.headers['X-Line-Signature']
 
     # get request body as text
@@ -233,10 +233,22 @@ async def handle_callback(request: Request):
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
+    # Process events in background tasks
     for event in events:
         if not isinstance(event, MessageEvent):
             continue
+        
+        # Create background task for processing
+        background_tasks.add_task(process_line_event, event)
+    
+    # Return 200 OK immediately
+    return {"message": "OK"}
 
+async def process_line_event(event: MessageEvent):
+    """
+    Process LINE event in background to avoid timeout.
+    """
+    try:
         user_id = event.source.user_id
         print(f"Processing message from user: {user_id}")
 
@@ -247,7 +259,7 @@ async def handle_callback(request: Request):
             
             response = await generate_text_with_agent(msg, user_id)
             reply_msg = TextSendMessage(text=response)
-            await line_bot_api.reply_message(event.reply_token, reply_msg)
+            await line_bot_api.push_message(event.source.user_id, reply_msg)
             
         elif event.message.type == "image":
             print("Received image message")
@@ -258,13 +270,13 @@ async def handle_callback(request: Request):
                 # Generate response using the image
                 response = await generate_text_with_agent(image_prompt, user_id, image_content)
                 reply_msg = TextSendMessage(text=response)
-                await line_bot_api.reply_message(event.reply_token, reply_msg)
+                await line_bot_api.push_message(event.source.user_id, reply_msg)
                 
             except Exception as e:
                 print(f"Error processing image message: {e}")
                 error_msg = await format_error_message("image_processing")
-                await line_bot_api.reply_message(
-                    event.reply_token,
+                await line_bot_api.push_message(
+                    event.source.user_id,
                     TextSendMessage(text=error_msg)
                 )
         elif event.message.type == "file":
@@ -273,11 +285,11 @@ async def handle_callback(request: Request):
                 # Check file size first
                 if event.message.file_size > 10 * 1024 * 1024:  # 10MB limit
                     error_msg = await format_error_message("file_too_large")
-                    await line_bot_api.reply_message(
-                        event.reply_token,
+                    await line_bot_api.push_message(
+                        event.source.user_id,
                         TextSendMessage(text=error_msg)
                     )
-                    continue
+                    return
 
                 # Check if it's a PDF file
                 if event.message.file_name.lower().endswith('.pdf'):
@@ -313,24 +325,34 @@ async def handle_callback(request: Request):
                     else:
                         response = await format_error_message("vector_store", status_message)
                     
-                    reply_msg = TextSendMessage(text=response)
-                    await line_bot_api.reply_message(event.reply_token, reply_msg)
+                    await line_bot_api.push_message(
+                        event.source.user_id,
+                        TextSendMessage(text=response)
+                    )
                 else:
                     # Handle non-PDF files
                     error_msg = await format_error_message("pdf_unsupported")
-                    reply_msg = TextSendMessage(text=error_msg)
-                    await line_bot_api.reply_message(event.reply_token, reply_msg)
+                    await line_bot_api.push_message(
+                        event.source.user_id,
+                        TextSendMessage(text=error_msg)
+                    )
             except Exception as e:
                 print(f"Error processing file message: {e}")
                 error_msg = await format_error_message("general", str(e))
-                await line_bot_api.reply_message(
-                    event.reply_token,
+                await line_bot_api.push_message(
+                    event.source.user_id,
                     TextSendMessage(text=error_msg)
                 )
-        else:
-            continue
-
-    return 'OK'
+    except Exception as e:
+        print(f"Error in background task: {e}")
+        try:
+            error_msg = await format_error_message("general", str(e))
+            await line_bot_api.push_message(
+                event.source.user_id,
+                TextSendMessage(text=error_msg)
+            )
+        except:
+            print(f"Failed to send error message to user: {e}")
 
 async def generate_text_with_agent(prompt: str, user_id: str, content: Optional[dict] = None):
     """
