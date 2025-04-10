@@ -53,8 +53,11 @@ if not all([BASE_URL, API_KEY, MODEL_NAME, CHANNEL_SECRET, CHANNEL_ACCESS_TOKEN]
 # Initialize FastAPI app
 app = FastAPI()
 
+# Initialize aiohttp session
+session = aiohttp.ClientSession()
+
 # Initialize LINE bot API client
-http_client = AiohttpAsyncHttpClient()
+http_client = AiohttpAsyncHttpClient(session)
 parser = WebhookParser(CHANNEL_SECRET)
 line_bot_api = AsyncLineBotApi(CHANNEL_ACCESS_TOKEN, http_client)
 
@@ -86,13 +89,13 @@ MAX_HISTORY_LENGTH = 10
 
 # Error messages
 ERROR_MESSAGES = {
-    "image_processing": "ไม่สามารถประมวลผลรูปภาพได้ โปรดตรวจสอบว่าเป็นไฟล์ JPEG หรือ PNG\nUnable to process the image. Please ensure it's in a supported format (JPEG, PNG).",
-    "pdf_upload": "ไม่สามารถอัปโหลด PDF ได้ โปรดตรวจสอบว่าเป็นไฟล์ PDF ที่ถูกต้อง\nUnable to upload the PDF to our system. Please ensure it's a valid PDF file.",
-    "pdf_unsupported": "รองรับเฉพาะไฟล์ PDF เท่านั้น\nThis file type is not supported. Currently, we only support PDF files.",
-    "vector_store": "ได้รับเอกสารแล้วแต่ไม่สามารถจัดเก็บสำหรับการค้นหาขั้นสูงได้\nUnable to store the document for future reference. The document was received but cannot be used for advanced queries.",
-    "general": "เกิดข้อผิดพลาดที่ไม่คาดคิด โปรดลองอีกครั้งในภายหลัง\nAn unexpected error occurred. Please try again later.",
-    "file_too_large": "ไฟล์มีขนาดใหญ่เกินไป โปรดอัปโหลดไฟล์ที่มีขนาดไม่เกิน 10MB\nFile is too large. Please upload a file smaller than 10MB.",
-    "invalid_format": "รูปแบบไฟล์ไม่ถูกต้อง โปรดตรวจสอบว่าไฟล์ไม่เสียหาย\nInvalid file format. Please ensure the file is not corrupted."
+    "image_processing": "❌ รูปภาพไม่ถูกต้อง กรุณาส่งไฟล์ JPEG/PNG\n(Invalid image. Please send JPEG/PNG)",
+    "pdf_upload": "❌ ไฟล์ PDF ไม่ถูกต้อง\n(Invalid PDF file)",
+    "pdf_unsupported": "❌ รองรับเฉพาะไฟล์ PDF\n(PDF files only)",
+    "vector_store": "❌ ไม่สามารถจัดเก็บเอกสารได้\n(Unable to store document)",
+    "general": "❌ เกิดข้อผิดพลาด กรุณาลองใหม่\n(Error occurred. Please try again)",
+    "file_too_large": "❌ ไฟล์ใหญ่เกิน 10MB\n(File exceeds 10MB)",
+    "invalid_format": "❌ รูปแบบไฟล์ไม่ถูกต้อง\n(Invalid file format)"
 }
 
 # Document reference format
@@ -184,15 +187,10 @@ def update_conversation_history(user_id: str, role: str, content: str, image_con
 
 async def format_error_message(error_type: str, details: Optional[str] = None, language: str = "en") -> str:
     """
-    Format error messages based on error type and user's language.
-    Includes both Thai and English for better user experience.
+    Format error messages in a concise way.
+    Returns bilingual error message (Thai/English).
     """
-    base_message = ERROR_MESSAGES.get(error_type, ERROR_MESSAGES["general"])
-    if details and not any(x in str(details).lower() for x in ["http", "error", "exception", "traceback"]):
-        # Only include safe, user-friendly details
-        safe_details = ' '.join(str(details).split()[:10])  # First 10 words
-        base_message = f"{base_message}\n\nข้อมูลเพิ่มเติม | Additional info: {safe_details}"
-    return base_message
+    return ERROR_MESSAGES.get(error_type, ERROR_MESSAGES["general"])
 
 def format_document_reference(doc_id: str, doc_name: str) -> str:
     """
@@ -422,3 +420,8 @@ async def generate_text_with_agent(prompt: str, user_id: str, content: Optional[
         print(f"Error generating text: {e}")
         error_msg = await format_error_message("general", str(e))
         return error_msg
+
+# Add cleanup for session on app shutdown
+@app.on_event("shutdown")
+async def cleanup():
+    await session.close()
