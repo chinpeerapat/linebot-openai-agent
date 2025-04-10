@@ -30,14 +30,42 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Environment variables
-BASE_URL = os.getenv("EXAMPLE_BASE_URL") or ""
-API_KEY = os.getenv("EXAMPLE_API_KEY") or ""
-MODEL_NAME = os.getenv("EXAMPLE_MODEL_NAME") or ""
-VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID") or "vs_67f79305f05481919ea528bb2df2ade3"
+BASE_URL = os.getenv("EXAMPLE_BASE_URL")
+API_KEY = os.getenv("EXAMPLE_API_KEY")
+MODEL_NAME = os.getenv("EXAMPLE_MODEL_NAME")
+CHANNEL_SECRET = os.getenv("ChannelSecret")
+CHANNEL_ACCESS_TOKEN = os.getenv("ChannelAccessToken")
+VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID")  # Optional
 
-# LINE Bot configuration
-channel_secret = os.getenv('ChannelSecret', None)
-channel_access_token = os.getenv('ChannelAccessToken', None)
+# Validate required environment variables
+if not all([BASE_URL, API_KEY, MODEL_NAME, CHANNEL_SECRET, CHANNEL_ACCESS_TOKEN]):
+    missing_vars = [
+        var_name for var_name, var_value in {
+            "EXAMPLE_BASE_URL": BASE_URL,
+            "EXAMPLE_API_KEY": API_KEY,
+            "EXAMPLE_MODEL_NAME": MODEL_NAME,
+            "ChannelSecret": CHANNEL_SECRET,
+            "ChannelAccessToken": CHANNEL_ACCESS_TOKEN
+        }.items() if not var_value
+    ]
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+# Initialize FastAPI app
+app = FastAPI()
+
+# Initialize LINE bot API client
+http_client = AiohttpAsyncHttpClient()
+parser = WebhookParser(CHANNEL_SECRET)
+line_bot_api = AsyncLineBotApi(CHANNEL_ACCESS_TOKEN, http_client)
+
+# Initialize OpenAI client
+client = AsyncOpenAI(
+    base_url=BASE_URL,
+    api_key=API_KEY,
+)
+
+# Initialize conversation histories
+conversation_histories: Dict[str, List[Dict[str, Any]]] = {}
 
 # Image processing prompt
 image_prompt = '''
@@ -52,31 +80,6 @@ Analyze this PDF document and provide a detailed summary.
 Focus on key points, main ideas, tables, and figures.
 Respond in the same language as the user's query.
 '''
-
-# Validate environment variables
-if channel_secret is None:
-    print('Specify ChannelSecret as environment variable.')
-    sys.exit(1)
-if channel_access_token is None:
-    print('Specify ChannelAccessToken as environment variable.')
-    sys.exit(1)
-if not BASE_URL or not API_KEY or not MODEL_NAME:
-    raise ValueError(
-        "Please set EXAMPLE_BASE_URL, EXAMPLE_API_KEY, EXAMPLE_MODEL_NAME via env var or code."
-    )
-
-# Initialize the FastAPI app for LINEBot
-app = FastAPI()
-session = aiohttp.ClientSession()
-async_http_client = AiohttpAsyncHttpClient(session)
-line_bot_api = AsyncLineBotApi(channel_access_token, async_http_client)
-parser = WebhookParser(channel_secret)
-
-# Initialize OpenAI client
-client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
-
-# Initialize conversation history storage
-conversation_histories: Dict[str, List[dict]] = {}
 
 # Maximum conversation history length
 MAX_HISTORY_LENGTH = 10

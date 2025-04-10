@@ -5,3 +5,4 @@ web_search.py
 tools.py
 example.py
 file_search.py
+.env
