@@ -11,7 +11,7 @@ import aiohttp
 import PIL.Image
 from fastapi import Request, FastAPI, HTTPException, BackgroundTasks
 from openai import AsyncOpenAI
-from agents import Agent, OpenAIChatCompletionsModel, Runner, function_tool, set_tracing_disabled, WebSearchTool, FileSearchTool
+from agents import Agent, OpenAIChatCompletionsModel, Runner, trace, WebSearchTool, FileSearchTool
 
 from linebot.models import (
     MessageEvent, TextSendMessage, ImageMessage, FileMessage
@@ -74,7 +74,6 @@ parser = WebhookParser(channel_secret)
 
 # Initialize OpenAI client
 client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
-set_tracing_disabled(disabled=True)
 
 # Initialize conversation history storage
 conversation_histories: Dict[str, List[dict]] = {}
@@ -109,6 +108,30 @@ You can refer to this document in future questions using:
 2️⃣ "เอกสาร {doc_id} พูดถึงอะไรเกี่ยวกับ[หัวข้อ]?"
    "What does document {doc_id} say about [your topic]?"
 """
+
+# Initialize the agent with proper tools
+agent = Agent(
+    name="LINE Bot Assistant",
+    instructions="""You are a helpful assistant that can communicate in both Thai and English.
+    - Respond in the same language as the user's query
+    - For Thai users, provide responses in Thai with English translations when appropriate
+    - For English users, respond in English
+    - You can search the web for real-time information
+    - You can search through stored documents when given a Document ID
+    - For PDFs:
+        - When users mention a Document ID, use the file_search tool to retrieve relevant information
+        - Provide document summaries and answer specific questions about the content
+    - Be concise but informative in your responses
+    """,
+    tools=[
+        WebSearchTool(),
+        FileSearchTool(
+            max_num_results=3,
+            vector_store_ids=[VECTOR_STORE_ID] if VECTOR_STORE_ID else [],
+            include_search_results=True,
+        )
+    ],
+)
 
 async def process_image(message_id: str) -> str:
     """
@@ -256,7 +279,7 @@ async def process_line_event(event: MessageEvent):
             # Process text message
             msg = event.message.text
             print(f"Received text message: {msg}")
-            
+
             response = await generate_text_with_agent(msg, user_id)
             reply_msg = TextSendMessage(text=response)
             await line_bot_api.push_message(event.source.user_id, reply_msg)
@@ -356,84 +379,43 @@ async def process_line_event(event: MessageEvent):
 
 async def generate_text_with_agent(prompt: str, user_id: str, content: Optional[dict] = None):
     """
-    Generate a text completion using OpenAI Agent with conversation history.
+    Generate text response using the agent with conversation history and context.
     """
-    # Create agent with appropriate instructions
-    tools = [WebSearchTool()]
-    
-    # Add FileSearchTool if vector store ID is configured
-    if VECTOR_STORE_ID:
-        file_search = FileSearchTool(
-            max_num_results=3,
-            vector_store_ids=[VECTOR_STORE_ID],
-        )
-        tools.append(file_search)
-    
-    # Prepare conversation context
-    conversation_context = ""
-    if user_id in conversation_histories:
-        conversation_context = "Previous conversation:\n"
-        for msg in conversation_histories[user_id]:
-            prefix = "User: " if msg["role"] == "user" else "Assistant: "
-            msg_content = msg["content"]
-            if "image" in msg:
-                msg_content = "📷 [Image shared] " + msg_content
-            elif "pdf" in msg:
-                msg_content = "📄 [PDF shared] " + msg_content
-                if msg.get("file_id"):
-                    msg_content += f" [Doc ID: {msg['file_id']}]"
-            conversation_context += f"{prefix}{msg_content}\n"
-    
-    # Prepare the full prompt with context
-    full_prompt = f"{conversation_context}\nCurrent request: {prompt}"
-    if content:
-        if content.get("type") == "image":
-            full_prompt = f"{conversation_context}\nCurrent request: {prompt}\n[Image analysis requested]"
-        elif content.get("type") == "pdf":
-            pdf_text = content.get("content", "")
+    try:
+        # Get conversation history
+        conversation_context = ""
+        if user_id in conversation_histories:
+            history = conversation_histories[user_id]
+            conversation_context = "Previous conversation:\n" + "\n".join(
+                f"{msg['role']}: {msg['content']}" for msg in history
+            )
+
+        # Add PDF context if available
+        if content and content.get("type") == "pdf":
             file_id = content.get("file_id")
             if file_id:
-                full_prompt = f"{conversation_context}\nCurrent request: {prompt}\nPDF Content (Document ID: {file_id}):\n{pdf_text}"
+                full_prompt = f"{conversation_context}\nCurrent request: {prompt}\nDocument ID to search: {file_id}"
             else:
-                full_prompt = f"{conversation_context}\nCurrent request: {prompt}\nPDF Content:\n{pdf_text}"
-    
-    agent = Agent(
-        name="Assistant",
-        instructions="""You are a helpful assistant that can communicate in multiple languages.
-        You should detect the language of the user's query and respond in the same language.
-       
-        
-        You can understand text, images, and PDF documents, and provide informative responses.
-        You can search the web for real-time information and through stored documents when needed.
-        Maintain conversation context and refer to previous messages when relevant.
-        
-        For images:
-        - Provide detailed scientific analysis
-        - Respond in the same language as the user's query or previous conversation
-        
-        For PDFs:
-        - Analyze the content and provide comprehensive summaries
-        - Maintain the same language as the user's query
-        - When users mention a Document ID, use the file_search tool to retrieve relevant information
-        
-        Always maintain the conversation in the user's preferred language throughout the interaction.""",
-        model=OpenAIChatCompletionsModel(
-            model=MODEL_NAME, openai_client=client),
-        tools=tools,
-    )
+                full_prompt = f"{conversation_context}\nCurrent request: {prompt}"
+        else:
+            full_prompt = f"{conversation_context}\nCurrent request: {prompt}"
 
-    try:
-        # Run the agent with the full context
-        result = await Runner.run(agent, full_prompt)
-        response = result.final_output
-        
+        # Run the agent with tracing
+        with trace(f"Generate response for user {user_id}"):
+            result = await Runner.run(agent, full_prompt)
+            response = result.final_output
+
+            # Log tool usage if any
+            if result.new_items:
+                print("\n".join([str(out) for out in result.new_items]))
+
         # Update conversation history
-        update_conversation_history(user_id, "user", prompt, content)
+        update_conversation_history(user_id, "user", prompt)
         update_conversation_history(user_id, "assistant", response)
-        
+
         return response
+
     except Exception as e:
-        print(f"Error with OpenAI Agent: {e}")
+        print(f"Error generating text: {e}")
         error_msg = await format_error_message("general", str(e))
-        update_conversation_history(user_id, "system", error_msg)
         return error_msg
