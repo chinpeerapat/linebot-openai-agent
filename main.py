@@ -2,7 +2,7 @@ import os
 import sys
 import asyncio
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 import json
 import base64
 from datetime import datetime
@@ -38,16 +38,16 @@ CHANNEL_ACCESS_TOKEN = os.getenv("ChannelAccessToken")
 VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID")  # Optional
 
 # Validate required environment variables
-if not all([BASE_URL, API_KEY, MODEL_NAME, CHANNEL_SECRET, CHANNEL_ACCESS_TOKEN]):
-    missing_vars = [
-        var_name for var_name, var_value in {
-            "EXAMPLE_BASE_URL": BASE_URL,
-            "EXAMPLE_API_KEY": API_KEY,
-            "EXAMPLE_MODEL_NAME": MODEL_NAME,
-            "ChannelSecret": CHANNEL_SECRET,
-            "ChannelAccessToken": CHANNEL_ACCESS_TOKEN
-        }.items() if not var_value
-    ]
+required_vars = {
+    "EXAMPLE_BASE_URL": BASE_URL,
+    "EXAMPLE_API_KEY": API_KEY,
+    "EXAMPLE_MODEL_NAME": MODEL_NAME,
+    "ChannelSecret": CHANNEL_SECRET,
+    "ChannelAccessToken": CHANNEL_ACCESS_TOKEN
+}
+
+missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
+if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 # Initialize FastAPI app
@@ -70,22 +70,11 @@ client = AsyncOpenAI(
 # Initialize conversation histories
 conversation_histories: Dict[str, List[Dict[str, Any]]] = {}
 
-# Image processing prompt
-image_prompt = '''
-Please describe this image with scientific detail.
-Provide a detailed analysis focusing on scientific aspects and notable features.
-Respond in the same language as the user's query.
-'''
-
-# File processing prompts
-pdf_prompt = '''
-Analyze this PDF document and provide a detailed summary.
-Focus on key points, main ideas, tables, and figures.
-Respond in the same language as the user's query.
-'''
-
 # Maximum conversation history length
 MAX_HISTORY_LENGTH = 10
+
+# Constants
+MAX_FILE_SIZE_MB = 10
 
 # Error messages
 ERROR_MESSAGES = {
@@ -95,7 +84,8 @@ ERROR_MESSAGES = {
     "vector_store": "❌ ไม่สามารถจัดเก็บเอกสารได้\n(Unable to store document)",
     "general": "❌ เกิดข้อผิดพลาด กรุณาลองใหม่\n(Error occurred. Please try again)",
     "file_too_large": "❌ ไฟล์ใหญ่เกิน 10MB\n(File exceeds 10MB)",
-    "invalid_format": "❌ รูปแบบไฟล์ไม่ถูกต้อง\n(Invalid file format)"
+    "invalid_format": "❌ รูปแบบไฟล์ไม่ถูกต้อง\n(Invalid file format)",
+    "unsupported_message_type": "❌ ไม่รองรับประเภทข้อความนี้\n(Unsupported message type)"
 }
 
 # Document reference format
@@ -115,20 +105,16 @@ You can refer to this document in future questions using:
    "What does document {doc_id} say about [your topic]?"
 """
 
+# Prompts
+PROMPTS = {
+    "image": "Describe this image scientifically. Respond in user's language.",
+    "pdf": "Summarize this PDF document's key points and content. Respond in user's language."
+}
+
 # Initialize the agent with proper tools
 agent = Agent(
     name="LINE Bot Assistant",
-    instructions="""You are a helpful assistant that can communicate in both Thai and English.
-    - Respond in the same language as the user's query
-    - For Thai users, provide responses in Thai with English translations when appropriate
-    - For English users, respond in English
-    - You can search the web for real-time information
-    - You can search through stored documents when given a Document ID
-    - For PDFs:
-        - When users mention a Document ID, use the file_search tool to retrieve relevant information
-        - Provide document summaries and answer specific questions about the content
-    - Be concise but informative in your responses
-    """,
+    instructions="""Bilingual assistant (Thai/English). Match user's language. Use web search for current info and file_search for Document IDs. Be concise yet informative.""",
     tools=[
         WebSearchTool(),
         FileSearchTool(
@@ -139,45 +125,15 @@ agent = Agent(
     ],
 )
 
-async def process_image(message_id: str) -> str:
-    """
-    Process an image message and return its content.
-    """
-    try:
-        message_content = await line_bot_api.get_message_content(message_id)
-        image_data = BytesIO()
-        async for chunk in message_content:
-            image_data.write(chunk)
-        image_data.seek(0)
-        
-        # Convert to PIL Image for potential preprocessing
-        image = PIL.Image.open(image_data)
-        
-        # Convert image to base64 for OpenAI vision model
-        buffered = BytesIO()
-        image.save(buffered, format="JPEG")
-        image_content = {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode()}"
-            }
-        }
-        
-        return image_content
-    except Exception as e:
-        print(f"Error processing image: {e}")
-        raise
-
-def update_conversation_history(user_id: str, role: str, content: str, image_content: Optional[dict] = None):
-    """
-    Update the conversation history for a specific user.
-    """
+# Helper functions
+def update_conversation_history(user_id: str, role: str, content: str, file_content: Optional[dict] = None):
+    """Update the conversation history for a specific user."""
     if user_id not in conversation_histories:
         conversation_histories[user_id] = []
     
     message = {"role": role, "content": content}
-    if image_content:
-        message["image"] = image_content
+    if file_content:
+        message["file"] = file_content
     
     conversation_histories[user_id].append(message)
     
@@ -185,17 +141,8 @@ def update_conversation_history(user_id: str, role: str, content: str, image_con
     if len(conversation_histories[user_id]) > MAX_HISTORY_LENGTH:
         conversation_histories[user_id] = conversation_histories[user_id][-MAX_HISTORY_LENGTH:]
 
-async def format_error_message(error_type: str, details: Optional[str] = None, language: str = "en") -> str:
-    """
-    Format error messages in a concise way.
-    Returns bilingual error message (Thai/English).
-    """
-    return ERROR_MESSAGES.get(error_type, ERROR_MESSAGES["general"])
-
 def format_document_reference(doc_id: str, doc_name: str) -> str:
-    """
-    Format document reference information in a consistent way with both Thai and English.
-    """
+    """Format document reference information in a consistent way with both Thai and English."""
     # Clean and truncate document name if too long
     safe_doc_name = doc_name[:50] + "..." if len(doc_name) > 50 else doc_name
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -206,192 +153,95 @@ def format_document_reference(doc_id: str, doc_name: str) -> str:
         timestamp=timestamp
     )
 
-async def process_pdf(message_id: str, file_name: str) -> Tuple[str, Optional[str]]:
-    """
-    Process a PDF file message and upload to vector store.
-    Returns a tuple of (status_message, vector_store_file_id).
-    """
+async def send_message(user_id: str, message: str):
+    """Send a text message to a user."""
     try:
-        message_content = await line_bot_api.get_message_content(message_id)
-        pdf_data = BytesIO()
-        total_size = 0
-        async for chunk in message_content:
-            total_size += len(chunk)
-            if total_size > 10 * 1024 * 1024:  # 10MB limit
-                error_msg = await format_error_message("file_too_large")
-                return error_msg, None
-            pdf_data.write(chunk)
-        pdf_data.seek(0)
+        await line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        return True
+    except Exception as e:
+        print(f"Failed to send message to user {user_id}: {e}")
+        return False
+
+async def send_error(user_id: str, error_type: str):
+    """Send an error message to a user."""
+    error_message = ERROR_MESSAGES.get(error_type, ERROR_MESSAGES["general"])
+    return await send_message(user_id, error_message)
+
+async def process_file_content(message_id: str, size_limit_mb: int = MAX_FILE_SIZE_MB) -> Tuple[BytesIO, int]:
+    """Process file content from LINE API and return BytesIO object and size."""
+    content = BytesIO()
+    total_size = 0
+    
+    message_content = await line_bot_api.get_message_content(message_id)
+    async for chunk in message_content:
+        total_size += len(chunk)
+        if total_size > size_limit_mb * 1024 * 1024:
+            raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
+        content.write(chunk)
+    
+    content.seek(0)
+    return content, total_size
+
+async def process_image(message_id: str) -> dict:
+    """Process an image message and return content for vision model."""
+    try:
+        image_data, _ = await process_file_content(message_id)
         
-        try:
-            # Upload to OpenAI's vector store
-            file_upload = await client.files.create(
-                file=pdf_data,
-                purpose="assistants",
-                file_name=file_name
-            )
-            vector_store_file_id = file_upload.id
-            print(f"Successfully uploaded PDF to vector store with ID: {vector_store_file_id}")
-            return "Success", vector_store_file_id
+        # Convert to PIL Image for potential preprocessing
+        image = PIL.Image.open(image_data)
+        
+        # Convert image to base64 for OpenAI vision model
+        buffered = BytesIO()
+        image.save(buffered, format="JPEG")
+        
+        return {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode()}"
+            }
+        }
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        raise
+
+async def process_pdf(message_id: str, file_name: str) -> Tuple[str, Optional[str]]:
+    """Process a PDF file and upload to vector store."""
+    try:
+        pdf_data, file_size = await process_file_content(message_id)
+        
+        # Upload to OpenAI's vector store
+        file_upload = await client.files.create(
+            file=pdf_data,
+            purpose="assistants",
+            file_name=file_name
+        )
+        
+        vector_store_file_id = file_upload.id
+        print(f"Successfully uploaded PDF to vector store with ID: {vector_store_file_id}")
+        return "Success", vector_store_file_id
             
-        except Exception as e:
-            print(f"Error uploading to vector store: {e}")
-            error_msg = await format_error_message("vector_store", str(e))
-            return error_msg, None
-        
+    except ValueError as ve:
+        # File size exception
+        return await send_error("file_too_large"), None
     except Exception as e:
         print(f"Error processing PDF: {e}")
-        error_msg = await format_error_message("pdf_upload", str(e))
-        raise HTTPException(status_code=400, detail=error_msg)
-
-@app.post("/")
-async def handle_callback(request: Request, background_tasks: BackgroundTasks):
-    signature = request.headers['X-Line-Signature']
-
-    # get request body as text
-    body = await request.body()
-    body = body.decode()
-
-    try:
-        events = parser.parse(body, signature)
-    except InvalidSignatureError:
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    # Process events in background tasks
-    for event in events:
-        if not isinstance(event, MessageEvent):
-            continue
-        
-        # Create background task for processing
-        background_tasks.add_task(process_line_event, event)
-    
-    # Return 200 OK immediately
-    return {"message": "OK"}
-
-async def process_line_event(event: MessageEvent):
-    """
-    Process LINE event in background to avoid timeout.
-    """
-    try:
-        user_id = event.source.user_id
-        print(f"Processing message from user: {user_id}")
-
-        if event.message.type == "text":
-            # Process text message
-            msg = event.message.text
-            print(f"Received text message: {msg}")
-
-            response = await generate_text_with_agent(msg, user_id)
-            reply_msg = TextSendMessage(text=response)
-            await line_bot_api.push_message(event.source.user_id, reply_msg)
-            
-        elif event.message.type == "image":
-            print("Received image message")
-            try:
-                # Process the image
-                image_content = await process_image(event.message.id)
-                
-                # Generate response using the image
-                response = await generate_text_with_agent(image_prompt, user_id, image_content)
-                reply_msg = TextSendMessage(text=response)
-                await line_bot_api.push_message(event.source.user_id, reply_msg)
-                
-            except Exception as e:
-                print(f"Error processing image message: {e}")
-                error_msg = await format_error_message("image_processing")
-                await line_bot_api.push_message(
-                    event.source.user_id,
-                    TextSendMessage(text=error_msg)
-                )
-        elif event.message.type == "file":
-            print("Received file message")
-            try:
-                # Check file size first
-                if event.message.file_size > 10 * 1024 * 1024:  # 10MB limit
-                    error_msg = await format_error_message("file_too_large")
-                    await line_bot_api.push_message(
-                        event.source.user_id,
-                        TextSendMessage(text=error_msg)
-                    )
-                    return
-
-                # Check if it's a PDF file
-                if event.message.file_name.lower().endswith('.pdf'):
-                    print("Processing PDF file")
-                    # Process the PDF and get both status and vector store ID
-                    status_message, vector_store_file_id = await process_pdf(event.message.id, event.message.file_name)
-                    
-                    if vector_store_file_id:
-                        # Update conversation history with PDF context
-                        update_conversation_history(
-                            user_id,
-                            "user",
-                            f"Uploaded PDF: {event.message.file_name}",
-                            {"type": "pdf", "file_id": vector_store_file_id}
-                        )
-                        
-                        # Generate response about the PDF using file search
-                        response = await generate_text_with_agent(
-                            f"A new PDF document has been uploaded with ID: {vector_store_file_id}. Please search this document and provide a summary.",
-                            user_id,
-                            {
-                                "type": "pdf",
-                                "file_id": vector_store_file_id
-                            }
-                        )
-                        
-                        # Add formatted document reference to the response
-                        doc_reference = format_document_reference(
-                            vector_store_file_id,
-                            event.message.file_name
-                        )
-                        response = f"{response}\n\n{doc_reference}"
-                    else:
-                        response = await format_error_message("vector_store", status_message)
-                    
-                    await line_bot_api.push_message(
-                        event.source.user_id,
-                        TextSendMessage(text=response)
-                    )
-                else:
-                    # Handle non-PDF files
-                    error_msg = await format_error_message("pdf_unsupported")
-                    await line_bot_api.push_message(
-                        event.source.user_id,
-                        TextSendMessage(text=error_msg)
-                    )
-            except Exception as e:
-                print(f"Error processing file message: {e}")
-                error_msg = await format_error_message("general", str(e))
-                await line_bot_api.push_message(
-                    event.source.user_id,
-                    TextSendMessage(text=error_msg)
-                )
-    except Exception as e:
-        print(f"Error in background task: {e}")
-        try:
-            error_msg = await format_error_message("general", str(e))
-            await line_bot_api.push_message(
-                event.source.user_id,
-                TextSendMessage(text=error_msg)
-            )
-        except:
-            print(f"Failed to send error message to user: {e}")
+        return await send_error("pdf_upload"), None
 
 async def generate_text_with_agent(prompt: str, user_id: str, content: Optional[dict] = None):
-    """
-    Generate text response using the agent with conversation history and context.
-    """
+    """Generate text response using the agent with conversation history and context."""
     try:
         # Get conversation history
-        conversation_context = ""
-        if user_id in conversation_histories:
-            history = conversation_histories[user_id]
+        history = conversation_histories.get(user_id, [])
+        
+        # Build conversation context
+        if history:
             conversation_context = "Previous conversation:\n" + "\n".join(
                 f"{msg['role']}: {msg['content']}" for msg in history
             )
+        else:
+            conversation_context = ""
 
-        # Add PDF context if available
+        # Add file context if available
         if content and content.get("type") == "pdf":
             file_id = content.get("file_id")
             if file_id:
@@ -410,18 +260,152 @@ async def generate_text_with_agent(prompt: str, user_id: str, content: Optional[
             if result.new_items:
                 print("\n".join([str(out) for out in result.new_items]))
 
-        # Update conversation history
-        update_conversation_history(user_id, "user", prompt)
-        update_conversation_history(user_id, "assistant", response)
-
         return response
 
     except Exception as e:
         print(f"Error generating text: {e}")
-        error_msg = await format_error_message("general", str(e))
-        return error_msg
+        return ERROR_MESSAGES["general"]
+
+# Message handlers
+async def handle_text_message(event: MessageEvent):
+    """Handle text message events."""
+    user_id = event.source.user_id
+    msg = event.message.text
+    
+    # Generate response
+    response = await generate_text_with_agent(msg, user_id)
+    
+    # Update conversation history
+    update_conversation_history(user_id, "user", msg)
+    update_conversation_history(user_id, "assistant", response)
+    
+    # Send response
+    await send_message(user_id, response)
+
+async def handle_image_message(event: MessageEvent):
+    """Handle image message events."""
+    user_id = event.source.user_id
+    
+    try:
+        # Process the image
+        image_content = await process_image(event.message.id)
+        
+        # Generate response using the image
+        response = await generate_text_with_agent(PROMPTS["image"], user_id, image_content)
+        
+        # Update conversation history
+        update_conversation_history(user_id, "user", "Uploaded an image", {"type": "image"})
+        update_conversation_history(user_id, "assistant", response)
+        
+        # Send response
+        await send_message(user_id, response)
+        
+    except Exception as e:
+        print(f"Error processing image message: {e}")
+        await send_error(user_id, "image_processing")
+
+async def handle_file_message(event: MessageEvent):
+    """Handle file message events."""
+    user_id = event.source.user_id
+    file_name = event.message.file_name
+    file_size = event.message.file_size
+    
+    # Check file size first
+    if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
+        await send_error(user_id, "file_too_large")
+        return
+
+    # Check if it's a PDF file
+    if file_name.lower().endswith('.pdf'):
+        try:
+            # Process the PDF
+            status_message, vector_store_file_id = await process_pdf(event.message.id, file_name)
+            
+            if vector_store_file_id:
+                # Update conversation history
+                update_conversation_history(
+                    user_id,
+                    "user",
+                    f"Uploaded PDF: {file_name}",
+                    {"type": "pdf", "file_id": vector_store_file_id}
+                )
+                
+                # Generate response about the PDF
+                prompt = f"A new PDF document has been uploaded with ID: {vector_store_file_id}. Please search this document and provide a summary."
+                response = await generate_text_with_agent(
+                    prompt,
+                    user_id,
+                    {"type": "pdf", "file_id": vector_store_file_id}
+                )
+                
+                # Add document reference
+                doc_reference = format_document_reference(vector_store_file_id, file_name)
+                full_response = f"{response}\n\n{doc_reference}"
+                
+                # Update assistant response in history
+                update_conversation_history(user_id, "assistant", full_response)
+                
+                # Send response
+                await send_message(user_id, full_response)
+            else:
+                await send_error(user_id, "vector_store")
+        except Exception as e:
+            print(f"Error processing PDF: {e}")
+            await send_error(user_id, "pdf_upload")
+    else:
+        # Handle non-PDF files
+        await send_error(user_id, "pdf_unsupported")
+
+async def process_line_event(event: MessageEvent):
+    """Process LINE event using a dispatcher pattern."""
+    user_id = event.source.user_id
+    print(f"Processing {event.message.type} message from user: {user_id}")
+    
+    # Message type handlers
+    handlers = {
+        "text": handle_text_message,
+        "image": handle_image_message,
+        "file": handle_file_message
+    }
+    
+    # Get the appropriate handler
+    handler = handlers.get(event.message.type)
+    if not handler:
+        await send_error(user_id, "unsupported_message_type")
+        return
+        
+    # Execute the handler
+    try:
+        await handler(event)
+    except Exception as e:
+        print(f"Error in {event.message.type} handler: {e}")
+        await send_error(user_id, "general")
+
+# FastAPI endpoints
+@app.post("/")
+async def handle_callback(request: Request, background_tasks: BackgroundTasks):
+    """Handle LINE webhook callbacks."""
+    signature = request.headers.get('X-Line-Signature', '')
+    
+    # Get request body as text
+    body = await request.body()
+    body_text = body.decode()
+
+    try:
+        events = parser.parse(body_text, signature)
+    except InvalidSignatureError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    # Process events in background tasks
+    for event in events:
+        if isinstance(event, MessageEvent):
+            background_tasks.add_task(process_line_event, event)
+    
+    # Return 200 OK immediately
+    return {"message": "OK"}
 
 # Add cleanup for session on app shutdown
 @app.on_event("shutdown")
 async def cleanup():
+    """Clean up resources on application shutdown."""
     await session.close()
