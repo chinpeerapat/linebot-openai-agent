@@ -114,13 +114,13 @@ PROMPTS = {
 # Initialize the agent with proper tools
 agent = Agent(
     name="LINE Bot Assistant",
-    instructions="""Bilingual assistant (Thai/English). Match user's language. Use web search for current info and file_search for Document IDs. Be concise yet informative.""",
+    instructions="""You are a helpful assistant. Match user's language. Use web search for current info and file_search for Document IDs. Be concise yet informative.""",
     tools=[
         WebSearchTool(),
         FileSearchTool(
             max_num_results=3,
             vector_store_ids=[VECTOR_STORE_ID] if VECTOR_STORE_ID else [],
-            include_search_results=True,
+            include_search_results=False,
         )
     ],
 )
