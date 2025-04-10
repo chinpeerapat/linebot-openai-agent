@@ -1,8 +1,8 @@
-# LINE Bot with OpenAI Agent and Google Gemini
+# LINE Bot with OpenAI Agent
 
 ## Project Background
 
-This project is a LINE bot that uses both OpenAI Agent functionality and Google Gemini models to generate responses to text inputs. The bot can answer questions in Traditional Chinese and provide helpful information.
+This project is a LINE bot that uses OpenAI Agent functionality to generate responses to text inputs. The bot can answer questions in Thai and English, process images, and handle PDF documents with advanced search capabilities.
 
 ## Screenshot
 
@@ -11,8 +11,10 @@ This project is a LINE bot that uses both OpenAI Agent functionality and Google 
 
 ## Features
 
-- Text message processing using OpenAI Agent in Traditional Chinese
-- Support for function calling with tools like weather information and translation
+- Multilingual support with Thai and English
+- Text message processing using OpenAI Agent
+- Image analysis with scientific detail
+- PDF document processing with vector search capabilities
 - Integration with LINE Messaging API for easy mobile access
 - Built with FastAPI for efficient asynchronous processing
 
@@ -24,43 +26,62 @@ This project is a LINE bot that uses both OpenAI Agent functionality and Google 
 - OpenAI Agent framework
 - Aiohttp
 - PIL (Python Imaging Library)
+- Vector Store for document search
+- python-dotenv for environment configuration
 
 ## Setup
 
 1. Clone the repository to your local machine.
-2. Set the following environment variables:
-   - `ChannelSecret`: Your LINE channel secret
-   - `ChannelAccessToken`: Your LINE channel access token
-   - `EXAMPLE_BASE_URL`: Your OpenAI compatible API base URL. If you want to use Google Gemini, you should fill `https://generativelanguage.googleapis.com/v1beta/` here.
-   - `EXAMPLE_API_KEY`: Your OpenAI compatible API key, If you want to use Gemini
-   - `EXAMPLE_MODEL_NAME`: The model name to use with the API (e.g., "gpt-4")
 
-3. Install the required dependencies:
-
+2. Create a `.env` file by copying the example:
+   ```bash
+   cp .env.example .env
    ```
+
+3. Edit the `.env` file with your configuration:
+   ```env
+   # OpenAI Configuration
+   EXAMPLE_BASE_URL=https://api.openai.com/v1
+   EXAMPLE_API_KEY=your_openai_api_key_here
+   EXAMPLE_MODEL_NAME=gpt-4
+
+   # LINE Bot Configuration
+   ChannelSecret=your_line_channel_secret_here
+   ChannelAccessToken=your_line_channel_access_token_here
+
+   # Optional Vector Store Configuration
+   VECTOR_STORE_ID=your_vector_store_id_here  # Optional
+   ```
+
+4. Install the required dependencies:
+   ```bash
    pip install -r requirements.txt
    ```
 
-4. Start the FastAPI server:
-
-   ```
+5. Start the FastAPI server:
+   ```bash
    uvicorn main:app --reload
    ```
 
-5. Set up your LINE bot webhook URL to point to your server's endpoint.
+6. Set up your LINE bot webhook URL to point to your server's endpoint.
 
 ## Usage
 
 ### Text Processing
 
-Send any text message to the LINE bot, and it will use the OpenAI Agent to generate a response in Traditional Chinese.
+Send any text message to the LINE bot, and it will use the OpenAI Agent to generate a response in the same language as your query (Thai or English).
 
-### Available Tools
+### Image Analysis
 
-The bot has access to the following function tools:
+Send an image to the bot, and it will provide a detailed scientific analysis in the same language as your previous conversation.
 
-- `get_weather`: Get weather information for a specified city
-- `translate_to_chinese`: Translate text to Traditional Chinese
+### PDF Document Processing
+
+Upload PDF files (up to 10MB) to the bot for:
+- Automatic content analysis
+- Vector store indexing for advanced search
+- Bilingual document references
+- Context-aware document querying
 
 ## Deployment Options
 
@@ -78,7 +99,14 @@ You can use the included Dockerfile to build and deploy the application:
 
 ```
 docker build -t linebot-openai-agent .
-docker run -p 8000:8000 -e ChannelSecret=YOUR_SECRET -e ChannelAccessToken=YOUR_TOKEN -e EXAMPLE_BASE_URL=YOUR_BASE_URL -e EXAMPLE_API_KEY=YOUR_API_KEY -e EXAMPLE_MODEL_NAME=YOUR_MODEL linebot-openai-agent
+docker run -p 8000:8000 \
+  -e ChannelSecret=YOUR_SECRET \
+  -e ChannelAccessToken=YOUR_TOKEN \
+  -e EXAMPLE_BASE_URL=YOUR_BASE_URL \
+  -e EXAMPLE_API_KEY=YOUR_API_KEY \
+  -e EXAMPLE_MODEL_NAME=YOUR_MODEL \
+  -e VECTOR_STORE_ID=YOUR_VECTOR_STORE_ID \
+  linebot-openai-agent
 ```
 
 ### Cloud Deployment
@@ -93,7 +121,11 @@ docker run -p 8000:8000 -e ChannelSecret=YOUR_SECRET -e ChannelAccessToken=YOUR_
 3. Deploy the Docker image to Cloud Run:
 
    ```
-   gcloud run deploy linebot-openai-agent --image gcr.io/$GOOGLE_PROJECT_ID/linebot-openai-agent --platform managed --region $REGION --allow-unauthenticated
+   gcloud run deploy linebot-openai-agent \
+     --image gcr.io/$GOOGLE_PROJECT_ID/linebot-openai-agent \
+     --platform managed \
+     --region $REGION \
+     --allow-unauthenticated
    ```
 
 4. Set up your LINE bot webhook URL to point to the Cloud Run service URL.
