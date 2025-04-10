@@ -187,25 +187,23 @@ async def process_image(message_id: str) -> dict:
     try:
         image_data, _ = await process_file_content(message_id)
         
-        # Convert to PIL Image to detect format
+        # Convert to PIL Image for potential preprocessing
         image = PIL.Image.open(image_data)
-        img_format = image.format.lower() if image.format else "jpeg"  # Default to JPEG if format unknown
-        mime_type = f"image/{img_format}"
         
-        # Save to BytesIO maintaining original format
+        # Convert image to base64 for OpenAI vision model
         buffered = BytesIO()
-        image.save(buffered, format=image.format)
+        image.save(buffered, format="JPEG")
         
         return {
             "type": "image_url",
             "image_url": {
-                "url": f"data:{mime_type};base64,{base64.b64encode(buffered.getvalue()).decode()}"
+                "url": f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode()}"
             }
         }
     except Exception as e:
         print(f"Error processing image: {e}")
         raise
-    
+
 async def process_pdf(message_id: str, file_name: str) -> Tuple[str, Optional[str]]:
     """Process a PDF file and upload to vector store."""
     try:
