@@ -198,26 +198,48 @@ async def process_file_content(message_id: str, size_limit_mb: int = Config.MAX_
     try:
         message_content = await line_bot_api.get_message_content(message_id)
         
-        # Handle content directly if it's not an async iterable
-        if not hasattr(message_content, '__aiter__'):
-            # For newer LINE SDK versions that return Content object directly
-            data = await message_content.content()
+        # Handle content based on what's returned by the LINE SDK
+        if hasattr(message_content, 'content'):
+            # message_content.content is a coroutine, not a method
+            data = await message_content.content
             total_size = len(data)
             if total_size > size_limit_mb * 1024 * 1024:
                 raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
             content.write(data)
-        else:
-            # For older LINE SDK versions that return an async iterable
+        elif hasattr(message_content, 'iter_content'):
+            # If iter_content is available
+            async for chunk in message_content.iter_content():
+                total_size += len(chunk)
+                if total_size > size_limit_mb * 1024 * 1024:
+                    raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
+                content.write(chunk)
+        elif hasattr(message_content, '__aiter__'):
+            # For older LINE SDK versions with async iterable
             async for chunk in message_content:
                 total_size += len(chunk)
                 if total_size > size_limit_mb * 1024 * 1024:
                     raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
                 content.write(chunk)
+        else:
+            # Last resort: try to read content as a single blob
+            try:
+                data = await message_content.read()
+                total_size = len(data)
+                if total_size > size_limit_mb * 1024 * 1024:
+                    raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
+                content.write(data)
+            except AttributeError:
+                # If we can't figure out how to read the content, log detailed info
+                print(f"Unknown content type: {type(message_content)}")
+                print(f"Available attributes: {dir(message_content)}")
+                raise ValueError("Unable to read content from LINE API")
     
         content.seek(0)
         return content, total_size
     except Exception as e:
-        print(f"Error processing file content: {e}")
+        print(f"Error processing file content: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise
 
 async def process_media_direct(message_id: str, media_type: str) -> Optional[str]:
