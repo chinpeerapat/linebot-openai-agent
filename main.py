@@ -195,50 +195,77 @@ async def process_file_content(message_id: str, size_limit_mb: int = Config.MAX_
     content = BytesIO()
     total_size = 0
     
-    message_content = await line_bot_api.get_message_content(message_id)
-    async for chunk in message_content:
-        total_size += len(chunk)
-        if total_size > size_limit_mb * 1024 * 1024:
-            raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
-        content.write(chunk)
+    try:
+        message_content = await line_bot_api.get_message_content(message_id)
+        
+        # Handle content directly if it's not an async iterable
+        if not hasattr(message_content, '__aiter__'):
+            # For newer LINE SDK versions that return Content object directly
+            data = await message_content.content()
+            total_size = len(data)
+            if total_size > size_limit_mb * 1024 * 1024:
+                raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
+            content.write(data)
+        else:
+            # For older LINE SDK versions that return an async iterable
+            async for chunk in message_content:
+                total_size += len(chunk)
+                if total_size > size_limit_mb * 1024 * 1024:
+                    raise ValueError(f"File size exceeds {size_limit_mb}MB limit")
+                content.write(chunk)
     
-    content.seek(0)
-    return content, total_size
+        content.seek(0)
+        return content, total_size
+    except Exception as e:
+        print(f"Error processing file content: {e}")
+        raise
 
 async def process_media_direct(message_id: str, media_type: str) -> Optional[str]:
     """Process media (image or PDF) and return base64 encoded content."""
     try:
-        media_data, _ = await process_file_content(message_id)
+        media_data, size = await process_file_content(message_id)
+        print(f"Successfully retrieved {media_type} content, size: {size} bytes")
         
         if media_type == "image":
             # Validate and convert image using PIL
             try:
                 image = PIL.Image.open(media_data)
+                print(f"Opened image: format={image.format}, mode={image.mode}, size={image.size}")
+                
                 # Convert to RGB if image is in RGBA mode
                 if image.mode in ('RGBA', 'LA'):
                     background = PIL.Image.new('RGB', image.size, (255, 255, 255))
                     background.paste(image, mask=image.split()[-1])
                     image = background
+                    print("Converted image with alpha channel to RGB")
                 elif image.mode not in ('RGB', 'L'):
                     image = image.convert('RGB')
+                    print(f"Converted image from {image.mode} to RGB")
                 
                 # Save the processed image to a BytesIO object as JPEG
                 output = BytesIO()
                 image.save(output, format='JPEG', quality=95)
                 output.seek(0)
+                output_size = output.getbuffer().nbytes
+                print(f"Converted image to JPEG, new size: {output_size} bytes")
                 base64_media = base64.b64encode(output.getvalue()).decode('utf-8')
                 return f"data:image/jpeg;base64,{base64_media}"
             except Exception as e:
-                print(f"Error processing image with PIL: {e}")
+                print(f"Error processing image with PIL: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return None
         elif media_type == "pdf":
             base64_media = base64.b64encode(media_data.getvalue()).decode('utf-8')
+            print(f"Encoded PDF to base64, size: {len(base64_media)} characters")
             return f"data:application/pdf;base64,{base64_media}"
         else:
             raise ValueError(f"Unsupported media type: {media_type}")
             
     except Exception as e:
-        print(f"Error processing media: {e}")
+        print(f"Error processing media: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 # Legacy vector store methods (kept for fallback)
@@ -433,12 +460,17 @@ async def handle_image_message(event: MessageEvent):
     user_id = event.source.user_id
     
     try:
+        print(f"Processing image from user: {user_id}, message ID: {event.message.id}")
+        
         # Get base64 encoded image
         base64_image = await process_media_direct(event.message.id, "image")
         
         if not base64_image:
+            print(f"Failed to process image for user: {user_id}")
             await send_error(user_id, ErrorType.IMAGE_PROCESSING)
             return
+        
+        print(f"Successfully processed image for user: {user_id}, base64 length: {len(base64_image)}")
             
         # Generate response using the image directly
         response = await generate_text_with_agent(
@@ -453,9 +485,12 @@ async def handle_image_message(event: MessageEvent):
         
         # Send response
         await send_message(user_id, response)
+        print(f"Successfully sent response to user: {user_id}")
         
     except Exception as e:
-        print(f"Error processing image message: {e}")
+        print(f"Error processing image message: {str(e)}")
+        import traceback
+        traceback.print_exc()
         await send_error(user_id, ErrorType.IMAGE_PROCESSING)
 
 async def handle_file_message(event: MessageEvent):
