@@ -209,11 +209,30 @@ async def process_media_direct(message_id: str, media_type: str) -> Optional[str
     """Process media (image or PDF) and return base64 encoded content."""
     try:
         media_data, _ = await process_file_content(message_id)
-        base64_media = base64.b64encode(media_data.getvalue()).decode('utf-8')
         
         if media_type == "image":
-            return f"data:image/jpeg;base64,{base64_media}"
+            # Validate and convert image using PIL
+            try:
+                image = PIL.Image.open(media_data)
+                # Convert to RGB if image is in RGBA mode
+                if image.mode in ('RGBA', 'LA'):
+                    background = PIL.Image.new('RGB', image.size, (255, 255, 255))
+                    background.paste(image, mask=image.split()[-1])
+                    image = background
+                elif image.mode not in ('RGB', 'L'):
+                    image = image.convert('RGB')
+                
+                # Save the processed image to a BytesIO object as JPEG
+                output = BytesIO()
+                image.save(output, format='JPEG', quality=95)
+                output.seek(0)
+                base64_media = base64.b64encode(output.getvalue()).decode('utf-8')
+                return f"data:image/jpeg;base64,{base64_media}"
+            except Exception as e:
+                print(f"Error processing image with PIL: {e}")
+                return None
         elif media_type == "pdf":
+            base64_media = base64.b64encode(media_data.getvalue()).decode('utf-8')
             return f"data:application/pdf;base64,{base64_media}"
         else:
             raise ValueError(f"Unsupported media type: {media_type}")
