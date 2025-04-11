@@ -14,7 +14,8 @@ import PIL.Image
 from fastapi import Request, FastAPI, HTTPException, BackgroundTasks
 from openai import AsyncOpenAI
 from agents import Agent, OpenAIChatCompletionsModel, Runner, trace, WebSearchTool, FileSearchTool
-
+from openai import OpenAI
+    
 from linebot.models import (
     MessageEvent, TextSendMessage, ImageMessage, FileMessage
 )
@@ -364,8 +365,11 @@ async def generate_text_with_agent(prompt: str, user_id: str, media_content: Opt
             timeout=30.0  # 30 second timeout
         )
 
-        # Extract response text
-        response_text = response.text.value
+        # Extract response text based on response type
+        if hasattr(response, 'output_text'):
+            response_text = response.output_text  # For text & websearch responses
+        else:
+            response_text = response.text.value  # For file search responses
         
         # Cache response for text-only queries
         if not media_content and Config.ENABLE_CACHING:
