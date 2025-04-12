@@ -1,19 +1,19 @@
-# LINE Bot with OpenAI Agent
+# LINE Bot with OpenAI Responses API
 
 ## Project Background
 
-This project is a LINE bot that uses OpenAI Agent functionality to generate responses to text inputs. The bot can answer questions in Thai and English, process images, and handle PDF documents with advanced search capabilities.
+This project is a LINE bot that uses OpenAI's Responses API to generate conversational responses to text inputs, images, and documents. The bot can answer questions in Thai and English, process images, and handle PDF documents with advanced search capabilities.
 
 ## Screenshot
 
 ![image](https://github.com/user-attachments/assets/61066eef-2802-4967-a5eb-e2a4e430e5f7)
 
-
 ## Features
 
 - Multilingual support with Thai and English
-- Text message processing using OpenAI Agent
-- Image analysis with scientific detail
+- Text message processing using OpenAI's latest Responses API
+- Web search capabilities for real-time information
+- Image analysis with configurable detail levels
 - PDF document processing with vector search capabilities
 - Integration with LINE Messaging API for easy mobile access
 - Built with FastAPI for efficient asynchronous processing
@@ -23,7 +23,8 @@ This project is a LINE bot that uses OpenAI Agent functionality to generate resp
 - Python 3
 - FastAPI
 - LINE Messaging API
-- OpenAI Agent framework
+- OpenAI Responses API
+- Web search and file search tools
 - Aiohttp
 - PIL (Python Imaging Library)
 - Vector Store for document search
@@ -41,16 +42,20 @@ This project is a LINE bot that uses OpenAI Agent functionality to generate resp
 3. Edit the `.env` file with your configuration:
    ```env
    # OpenAI Configuration
-   EXAMPLE_BASE_URL=https://api.openai.com/v1
-   EXAMPLE_API_KEY=your_openai_api_key_here
-   EXAMPLE_MODEL_NAME=gpt-4
+   OPENAI_API_BASE=https://api.openai.com/v1
+   OPENAI_API_KEY=your_openai_api_key_here
+   OPENAI_MODEL=gpt-4o
 
    # LINE Bot Configuration
-   ChannelSecret=your_line_channel_secret_here
-   ChannelAccessToken=your_line_channel_access_token_here
+   CHANNEL_SECRET=your_line_channel_secret_here
+   CHANNEL_ACCESS_TOKEN=your_line_channel_access_token_here
 
    # Optional Vector Store Configuration
    VECTOR_STORE_ID=your_vector_store_id_here  # Optional
+
+   # Feature Configuration
+   WEB_SEARCH_CONTEXT_SIZE=low  # Options: low, medium, high
+   IMAGE_DETAIL_LEVEL=high      # Options: low, high, auto
    ```
 
 4. Install the required dependencies:
@@ -69,11 +74,11 @@ This project is a LINE bot that uses OpenAI Agent functionality to generate resp
 
 ### Text Processing
 
-Send any text message to the LINE bot, and it will use the OpenAI Agent to generate a response in the same language as your query (Thai or English).
+Send any text message to the LINE bot, and it will use the OpenAI Responses API to generate a response in the same language as your query (Thai or English). The bot can search the web for up-to-date information when needed.
 
 ### Image Analysis
 
-Send an image to the bot, and it will provide a detailed scientific analysis in the same language as your previous conversation.
+Send an image to the bot, and it will provide a detailed analysis in the same language as your previous conversation. Image analysis detail level can be configured via environment variables.
 
 ### PDF Document Processing
 
@@ -82,6 +87,14 @@ Upload PDF files (up to 10MB) to the bot for:
 - Vector store indexing for advanced search
 - Bilingual document references
 - Context-aware document querying
+
+## Tool Capabilities
+
+The bot uses several advanced tools from the OpenAI Responses API:
+
+1. **Web Search**: Searches the internet for real-time information to provide up-to-date answers
+2. **File Search**: Searches through uploaded PDF documents using vector embeddings
+3. **Vision**: Analyzes and describes images with configurable detail levels
 
 ## Deployment Options
 
@@ -100,11 +113,11 @@ You can use the included Dockerfile to build and deploy the application:
 ```
 docker build -t linebot-openai-agent .
 docker run -p 8000:8000 \
-  -e ChannelSecret=YOUR_SECRET \
-  -e ChannelAccessToken=YOUR_TOKEN \
-  -e EXAMPLE_BASE_URL=YOUR_BASE_URL \
-  -e EXAMPLE_API_KEY=YOUR_API_KEY \
-  -e EXAMPLE_MODEL_NAME=YOUR_MODEL \
+  -e CHANNEL_SECRET=YOUR_SECRET \
+  -e CHANNEL_ACCESS_TOKEN=YOUR_TOKEN \
+  -e OPENAI_API_BASE=YOUR_BASE_URL \
+  -e OPENAI_API_KEY=YOUR_API_KEY \
+  -e OPENAI_MODEL=YOUR_MODEL \
   -e VECTOR_STORE_ID=YOUR_VECTOR_STORE_ID \
   linebot-openai-agent
 ```

@@ -6,3 +6,4 @@ tools.py
 example.py
 file_search.py
 .env
+.cursor/rules/**/*
