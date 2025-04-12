@@ -471,7 +471,6 @@ async def generate_text_with_agent(prompt: str, user_id: str, media_content: Opt
         api_params = {
             "model": Config.MODEL_NAME,
             "temperature": 1,
-            "max_tokens": 2048,
             "store": True  # Always store to enable chaining
         }
         
